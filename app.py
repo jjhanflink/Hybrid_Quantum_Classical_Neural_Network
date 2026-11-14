@@ -40,41 +40,41 @@ dataset_choice = st.sidebar.selectbox(
     help="Selects the raw data source. The classical computer cleans and compresses these features before sending them to the quantum circuit."
 )
 num_qubits = st.sidebar.slider(
-    "Number of Qubits (PCA Components)",
+    "Number of Qubits (Optimal: 2 - 3)",
     min_value=2, max_value=4, value=2,
     help="How many variables the data is compressed into. This directly sets how many physical qubits the quantum circuit uses. More qubits capture more complexity but take longer to simulate."
 )
 ansatz_reps = st.sidebar.slider(
-    "Ansatz Circuit Depth (Reps)",
+    "Ansatz Circuit Depth (Optimal: 1 - 2)",
     min_value=1, max_value=3, value=2,
     help="The number of trainable quantum gate layers. Deeper circuits (higher reps) can untangle more complex patterns, but are harder to train and suffer more hardware noise."
 )
 sample_limit = st.sidebar.number_input(
-    "Dataset Sample Size",
-    min_value=10, max_value=600, value=100, step=1,
+    "Dataset Sample Size (Optimal: 100 - 200)",
+    min_value=10, max_value=600, value=150, step=1,
     help="How many total examples (patients or wine samples) to pull. Type any exact number. Smaller sizes train faster; larger sizes provide more accurate real-world results."
 )
 
 st.sidebar.header("2. Training Hyperparameters")
 epochs = st.sidebar.number_input(
-    "Training Epochs",
-    min_value=1, max_value=100, value=12, step=1,
+    "Training Epochs (Optimal: 15 - 30)",
+    min_value=1, max_value=100, value=20, step=1,
     help="How many times PyTorch loops through the entire dataset to grade the quantum circuit and adjust its gate angles."
 )
 learning_rate = st.sidebar.number_input(
-    "Adam Learning Rate",
+    "Adam Learning Rate (Optimal: 0.010 - 0.050)",
     min_value=0.001, max_value=1.000, value=0.020, step=0.001, format="%.3f",
     help="How drastically the optimizer adjusts the quantum gate angles after each mistake. You can type exact decimals like 0.015."
 )
 batch_size = st.sidebar.number_input(
-    "Batch Size",
+    "Batch Size (Optimal: 16 - 32)",
     min_value=1, max_value=200, value=16, step=1,
     help="How many samples the model evaluates together before updating its weights. Type any exact integer. Smaller batches update more frequently."
 )
 
 st.sidebar.header("3. Noise & IBM QPU Hardware")
 sim_noise_level = st.sidebar.number_input(
-    "Simulated Gate Noise (Depolarizing Drift)",
+    "Simulated Gate Noise (Optimal: 0.00 - 0.05)",
     min_value=0.00, max_value=1.00, value=0.00, step=0.01, format="%.2f",
     help="Simulates hardware phase noise to mimic real quantum processors. Type exact decimals."
 )
