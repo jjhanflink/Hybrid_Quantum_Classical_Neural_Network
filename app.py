@@ -36,27 +36,56 @@ st.markdown(
 st.sidebar.header("1. Dataset & Quantum Architecture")
 dataset_choice = st.sidebar.selectbox(
     "Real-World Dataset (scikit-learn)",
-    ["Breast Cancer Diagnostics (30 features)", "Wine Chemical Analysis (13 features)"]
+    ["Breast Cancer Diagnostics (30 features)", "Wine Chemical Analysis (13 features)"],
+    help="Selects the raw data source. The classical computer cleans and compresses these features before sending them to the quantum circuit."
 )
-num_qubits = st.sidebar.slider("Number of Qubits (PCA Components)", min_value=2, max_value=4, value=2)
-ansatz_reps = st.sidebar.slider("Ansatz Circuit Depth (Reps)", min_value=1, max_value=3, value=2)
-sample_limit = st.sidebar.slider("Dataset Sample Size", min_value=60, max_value=200, value=100, step=20)
+num_qubits = st.sidebar.slider(
+    "Number of Qubits (PCA Components)",
+    min_value=2, max_value=4, value=2,
+    help="How many variables the data is compressed into. This directly sets how many physical qubits the quantum circuit uses. More qubits capture more complexity but take longer to simulate."
+)
+ansatz_reps = st.sidebar.slider(
+    "Ansatz Circuit Depth (Reps)",
+    min_value=1, max_value=3, value=2,
+    help="The number of trainable quantum gate layers. Deeper circuits (higher reps) can untangle more complex patterns, but are harder to train and suffer more hardware noise."
+)
+sample_limit = st.sidebar.slider(
+    "Dataset Sample Size",
+    min_value=60, max_value=200, value=100, step=20,
+    help="How many total examples (patients or wine samples) to pull. Smaller sizes train faster for quick demos; larger sizes provide more accurate real-world results."
+)
 
 st.sidebar.header("2. Training Hyperparameters")
-epochs = st.sidebar.slider("Training Epochs", min_value=5, max_value=30, value=12, step=1)
-learning_rate = st.sidebar.select_slider("Adam Learning Rate", options=[0.005, 0.01, 0.02, 0.05], value=0.02)
-batch_size = st.sidebar.selectbox("Batch Size", options=[8, 16, 32], index=1)
+epochs = st.sidebar.slider(
+    "Training Epochs",
+    min_value=5, max_value=30, value=12, step=1,
+    help="How many times PyTorch loops through the entire dataset to grade the quantum circuit and adjust its gate angles."
+)
+learning_rate = st.sidebar.select_slider(
+    "Adam Learning Rate",
+    options=[0.005, 0.01, 0.02, 0.05], value=0.02,
+    help="How drastically the optimizer adjusts the quantum gate angles after each mistake. Too high causes erratic jumping; too low slows down learning."
+)
+batch_size = st.sidebar.selectbox(
+    "Batch Size",
+    options=[8, 16, 32], index=1,
+    help="How many samples the model evaluates together before updating its weights. Smaller batches update more frequently; larger batches give smoother gradients."
+)
 
 st.sidebar.header("3. Noise & IBM QPU Hardware")
 sim_noise_level = st.sidebar.slider(
     "Simulated Gate Noise (Depolarizing Drift)",
     min_value=0.0, max_value=0.15, value=0.0, step=0.05,
-    help="Simulates hardware phase noise and applies Zero-Noise Extrapolation (ZNE) scaling."
+    help="Simulates hardware phase noise to mimic real quantum processors. Zero-Noise Extrapolation (ZNE) mathematically scales this noise back out."
 )
-enable_zne = st.sidebar.checkbox("Apply Zero-Noise Extrapolation (ZNE) Mitigation", value=True)
+enable_zne = st.sidebar.checkbox(
+    "Apply Zero-Noise Extrapolation (ZNE) Mitigation",
+    value=True,
+    help="A quantum error mitigation technique that runs the circuit at multiple noise levels to extrapolate the clean, zero-noise expectation value."
+)
 
 with st.sidebar.expander("🔌 Connect Real IBM QPU (Optional)"):
-    ibm_token = st.text_input("IBM Quantum API Token", type="password", help="From quantum.ibm.com")
+    ibm_token = st.text_input("IBM Quantum API Token", type="password", help="Your free Open Plan API token from quantum.ibm.com")
     verify_hw = st.button("Verify QPU & Transpile Circuit")
 
 # Step 1: Real-World Data Loading & Quantum Sanitizer
