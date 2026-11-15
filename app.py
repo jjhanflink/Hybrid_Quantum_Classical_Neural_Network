@@ -1,6 +1,7 @@
 ﻿import io
 import time
 import numpy as np
+import pandas as pd
 import matplotlib.pyplot as plt
 import streamlit as st
 import torch
@@ -14,7 +15,7 @@ from sklearn.preprocessing import StandardScaler, MinMaxScaler
 from sklearn.decomposition import PCA
 
 from qiskit import QuantumCircuit
-from qiskit.circuit.library import zz_feature_map, real_amplitudes
+from qiskit.circuit.library import zz_feature_map, EfficientSU2
 from qiskit_machine_learning.neural_networks import EstimatorQNN
 from qiskit_machine_learning.connectors import TorchConnector
 
@@ -36,70 +37,101 @@ st.markdown(
 st.sidebar.header("1. Dataset & Quantum Architecture")
 dataset_choice = st.sidebar.selectbox(
     "Real-World Dataset (scikit-learn)",
-    ["Breast Cancer Diagnostics (30 features)", "Wine Chemical Analysis (13 features)"],
-    help="Selects the raw data source. The classical computer cleans and compresses these features before sending them to the quantum circuit."
+    [
+        "Breast Cancer Diagnostics (30 features)", 
+        "Wine Chemical Analysis (13 features)",
+        "📂 Upload Custom CSV Dataset"
+    ],
+    help="Select a built-in dataset or upload your own real-world CSV. The classical computer cleans and compresses the features before sending them to the QPU."
 )
+
+uploaded_file = None
+target_col = None
+if dataset_choice == "📂 Upload Custom CSV Dataset":
+    uploaded_file = st.sidebar.file_uploader("Upload Custom Dataset (CSV)", type=['csv'])
+    if uploaded_file is not None:
+        df_temp = pd.read_csv(uploaded_file)
+        target_col = st.sidebar.selectbox(
+            "Select the Target/Label Column (Must be binary 0/1)", 
+            options=df_temp.columns,
+            help="Choose the column that contains the answer key (what the model is trying to predict)."
+        )
+        uploaded_file.seek(0)
+
 num_qubits = st.sidebar.slider(
-    "Number of Qubits (Optimal: 2 - 3)",
-    min_value=2, max_value=4, value=2,
-    help="How many variables the data is compressed into. This directly sets how many physical qubits the quantum circuit uses. More qubits capture more complexity but take longer to simulate."
+    "Number of Qubits (Optimal: 2 - 4)",
+    min_value=2, max_value=6, value=3,
+    help="How many variables the data is compressed into. This directly sets how many physical qubits the quantum circuit uses."
 )
 ansatz_reps = st.sidebar.slider(
-    "Ansatz Circuit Depth (Optimal: 1 - 2)",
-    min_value=1, max_value=3, value=2,
-    help="The number of trainable quantum gate layers. Deeper circuits (higher reps) can untangle more complex patterns, but are harder to train and suffer more hardware noise."
+    "Ansatz Circuit Depth (Optimal: 1 - 3)",
+    min_value=1, max_value=4, value=2,
+    help="The number of trainable quantum gate layers. Deeper circuits untangle more complex patterns but are harder to train."
 )
 sample_limit = st.sidebar.number_input(
-    "Dataset Sample Size (Optimal: 100 - 200)",
-    min_value=10, max_value=600, value=150, step=1,
-    help="How many total examples (patients or wine samples) to pull. Type any exact number. Smaller sizes train faster; larger sizes provide more accurate real-world results."
+    "Dataset Sample Size (Optimal: 100 - 300)",
+    min_value=10, max_value=1000, value=150, step=10,
+    help="How many total examples to pull. Smaller sizes train faster; larger sizes provide more stable real-world results."
 )
 
 st.sidebar.header("2. Training Hyperparameters")
 epochs = st.sidebar.number_input(
     "Training Epochs (Optimal: 15 - 30)",
     min_value=1, max_value=100, value=20, step=1,
-    help="How many times PyTorch loops through the entire dataset to grade the quantum circuit and adjust its gate angles."
+    help="How many times PyTorch loops through the dataset to grade the quantum circuit and adjust its gate angles."
 )
 learning_rate = st.sidebar.number_input(
     "Adam Learning Rate (Optimal: 0.010 - 0.050)",
     min_value=0.001, max_value=1.000, value=0.020, step=0.001, format="%.3f",
-    help="How drastically the optimizer adjusts the quantum gate angles after each mistake. You can type exact decimals like 0.015."
+    help="How drastically the optimizer adjusts the quantum gate angles after each mistake."
 )
 batch_size = st.sidebar.number_input(
     "Batch Size (Optimal: 16 - 32)",
     min_value=1, max_value=200, value=16, step=1,
-    help="How many samples the model evaluates together before updating its weights. Type any exact integer. Smaller batches update more frequently."
+    help="How many samples the model evaluates together before updating its weights. Type any exact integer."
 )
 
 st.sidebar.header("3. Noise & IBM QPU Hardware")
 sim_noise_level = st.sidebar.number_input(
     "Simulated Gate Noise (Optimal: 0.00 - 0.05)",
     min_value=0.00, max_value=1.00, value=0.00, step=0.01, format="%.2f",
-    help="Simulates hardware phase noise to mimic real quantum processors. Type exact decimals."
+    help="Simulates hardware phase noise to mimic real quantum processors."
 )
 enable_zne = st.sidebar.checkbox(
     "Apply Zero-Noise Extrapolation (ZNE) Mitigation",
     value=True,
-    help="A quantum error mitigation technique that runs the circuit at multiple noise levels to extrapolate the clean, zero-noise expectation value."
+    help="Runs the circuit at multiple noise levels to extrapolate the clean, zero-noise expectation value."
 )
 
 with st.sidebar.expander("🔌 Connect Real IBM QPU (Optional)"):
-    ibm_token = st.text_input("IBM Quantum API Token", type="password", help="Your free Open Plan API token from quantum.ibm.com")
+    ibm_token = st.text_input("IBM Quantum API Token", type="password", help="Your free API token from quantum.ibm.com")
     verify_hw = st.button("Verify QPU & Transpile Circuit")
+
+# Stop execution if user chose CSV but hasn't uploaded it yet
+if dataset_choice == "📂 Upload Custom CSV Dataset" and uploaded_file is None:
+    st.info("👆 Please upload a CSV file in the sidebar to continue.")
+    st.stop()
 
 # Step 1: Real-World Data Loading & Quantum Sanitizer
 @st.cache_data
-def load_and_sanitize_data(dataset_name: str, n_qubits: int, n_samples: int):
-    if "Breast Cancer" in dataset_name:
+def load_and_sanitize_data(dataset_name: str, n_qubits: int, n_samples: int, _csv_file=None, t_col=None):
+    if dataset_name == "📂 Upload Custom CSV Dataset":
+        df = pd.read_csv(_csv_file)
+        df = df.dropna(subset=[t_col])
+        y_raw = df[t_col].astype(int).values
+        # Drop target and grab only numeric columns
+        X_df = df.drop(columns=[t_col]).select_dtypes(include=[np.number]).fillna(0)
+        X_raw = X_df.values
+        feature_names = list(X_df.columns)
+    elif "Breast Cancer" in dataset_name:
         raw = load_breast_cancer()
         X_raw, y_raw = raw.data, raw.target
-        feature_names = raw.feature_names
+        feature_names = list(raw.feature_names)
     else:
         raw = load_wine()
         X_raw = raw.data
         y_raw = (raw.target == 0).astype(int)
-        feature_names = raw.feature_names
+        feature_names = list(raw.feature_names)
 
     rng = np.random.default_rng(42)
     indices = rng.choice(len(X_raw), size=min(n_samples, len(X_raw)), replace=False)
@@ -121,7 +153,7 @@ def load_and_sanitize_data(dataset_name: str, n_qubits: int, n_samples: int):
     return X_sub, X_angles, X_train, X_test, y_train, y_test, feature_names, explained_var
 
 X_raw_sub, X_angles, X_train, X_test, y_train, y_test, feat_names, var_explained = load_and_sanitize_data(
-    dataset_choice, num_qubits, sample_limit
+    dataset_choice, num_qubits, sample_limit, uploaded_file, target_col
 )
 
 # UI Section 1: Data Sanitization & Inspection
@@ -133,22 +165,21 @@ c3.metric("Variance Preserved", f"{var_explained:.1f}%")
 
 with st.expander("🔍 Inspect Angle Mapping (First 3 Samples)", expanded=False):
     preview_rows = []
-    for i in range(3):
-        row = {
-            "Sample": f"Sample #{i+1}",
-            f"Raw '{feat_names[0]}'": f"{X_raw_sub[i, 0]:.2f}",
-            f"Raw '{feat_names[1]}'": f"{X_raw_sub[i, 1]:.2f}",
-        }
+    for i in range(min(3, len(X_raw_sub))):
+        row = {"Sample": f"Sample #{i+1}"}
+        if len(feat_names) >= 2:
+            row[f"Raw '{feat_names[0]}'"] = f"{X_raw_sub[i, 0]:.2f}"
+            row[f"Raw '{feat_names[1]}'"] = f"{X_raw_sub[i, 1]:.2f}"
         for q in range(num_qubits):
             rad = X_angles[i, q]
-            row[f"Qubit {q} (rad / deg)"] = f"{rad:+.2f} rad ({np.degrees(rad):+.1f}°)"
+            row[f"Qubit {q} (rad)"] = f"{rad:+.2f} rad ({np.degrees(rad):+.1f}°)"
         preview_rows.append(row)
     st.table(preview_rows)
 
-# Step 2: Build Circuit Architecture
+# Step 2: Build Circuit Architecture (Upgraded to EfficientSU2)
 def build_quantum_circuit(n_qubits: int, reps: int):
     f_map = zz_feature_map(feature_dimension=n_qubits, reps=1, entanglement="linear")
-    ansatz = real_amplitudes(num_qubits=n_qubits, reps=reps, entanglement="linear")
+    ansatz = EfficientSU2(num_qubits=n_qubits, reps=reps, entanglement="linear")
     qc = QuantumCircuit(n_qubits)
     qc.compose(f_map, inplace=True)
     qc.compose(ansatz, inplace=True)
@@ -169,42 +200,18 @@ with c_vis1:
 
 with c_vis2:
     st.markdown("""
-    **Circuit Breakdown:**
+    **Architecture Breakdown:**
     1. **$H$ Gates:** Initialize qubits into equal superposition.
-    2. **$P / R_Z$ & $CNOT$ (`zz_feature_map`):** Encode angle features and entangle qubits to capture non-linear relationships.
-    3. **$R_Y(\\theta)$ Gates (`real_amplitudes`):** Trainable parameters adjusted during PyTorch backpropagation.
+    2. **$P / R_Z$ & $CNOT$ (`zz_feature_map`):** Encodes the PCA-compressed features.
+    3. **$R_Y(\\theta)$ & $R_Z(\\theta)$ Gates (`EfficientSU2`):** Highly expressive trainable ansatz that accesses the full 3D Bloch sphere.
     """)
-
-if verify_hw:
-    if not ibm_token:
-        st.sidebar.warning("Please enter your IBM Quantum API Token from quantum.ibm.com first.")
-    else:
-        with st.spinner("Connecting to IBM Quantum Platform..."):
-            try:
-                from qiskit_ibm_runtime import QiskitRuntimeService
-                from qiskit.transpiler.preset_passmanagers import generate_preset_pass_manager
-                service = QiskitRuntimeService(channel="ibm_quantum", token=ibm_token)
-                backend = service.least_busy(operational=True, simulator=False)
-                pm = generate_preset_pass_manager(backend=backend, optimization_level=1)
-                isa_circuit = pm.run(qc)
-                st.sidebar.success(
-                    f"Connected to **{backend.name}** ({backend.num_qubits} qubits). "
-                    f"Transpiled to {isa_circuit.size()} physical instructions."
-                )
-            except Exception as e:
-                st.sidebar.error(f"Hardware Connection Error: {e}")
 
 # Models: Hybrid QNN vs Classical MLP
 class HybridQNNClassifier(nn.Module):
     def __init__(self, n_qubits: int, reps: int):
         super().__init__()
         circuit, in_p, wt_p = build_quantum_circuit(n_qubits, reps)
-        qnn = EstimatorQNN(
-            circuit=circuit,
-            input_params=in_p,
-            weight_params=wt_p,
-            input_gradients=True
-        )
+        qnn = EstimatorQNN(circuit=circuit, input_params=in_p, weight_params=wt_p, input_gradients=True)
         self.pre_net = nn.Linear(n_qubits, n_qubits)
         self.q_layer = TorchConnector(qnn)
         self.post_net = nn.Linear(1, 1)
@@ -218,12 +225,9 @@ class ClassicalMLPBaseline(nn.Module):
     def __init__(self, in_features: int):
         super().__init__()
         self.net = nn.Sequential(
-            nn.Linear(in_features, 16),
-            nn.ReLU(),
-            nn.Linear(16, 16),
-            nn.ReLU(),
-            nn.Linear(16, 1),
-            nn.Sigmoid()
+            nn.Linear(in_features, 16), nn.ReLU(),
+            nn.Linear(16, 16), nn.ReLU(),
+            nn.Linear(16, 1), nn.Sigmoid()
         )
 
     def forward(self, x):
@@ -235,15 +239,7 @@ def count_parameters(model: nn.Module) -> int:
 def evaluate_accuracy(model: nn.Module, X_t: torch.Tensor, y_t: torch.Tensor, noise_std: float = 0.0, zne: bool = False) -> float:
     model.eval()
     with torch.no_grad():
-        if noise_std > 0.0:
-            noisy_1 = model(X_t + torch.randn_like(X_t) * noise_std)
-            if zne:
-                noisy_2 = model(X_t + torch.randn_like(X_t) * (2.0 * noise_std))
-                probs = torch.clamp(2.0 * noisy_1 - noisy_2, 0.0, 1.0)
-            else:
-                probs = noisy_1
-        else:
-            probs = model(X_t)
+        probs = model(X_t)
         preds = (probs >= 0.5).float()
         return (preds.eq(y_t).sum().item() / len(y_t)) * 100.0
 
@@ -258,24 +254,18 @@ if st.button("🚀 Train Both Models & Compare", type="primary"):
     y_test_t = torch.tensor(y_test, dtype=torch.float32).unsqueeze(1)
 
     train_loader = DataLoader(TensorDataset(X_train_t, y_train_t), batch_size=batch_size, shuffle=True)
-
     qnn_model = HybridQNNClassifier(num_qubits, ansatz_reps)
     mlp_model = ClassicalMLPBaseline(num_qubits)
 
-    q_params = count_parameters(qnn_model)
-    c_params = count_parameters(mlp_model)
-
+    q_params, c_params = count_parameters(qnn_model), count_parameters(mlp_model)
     criterion = nn.BCELoss()
     q_opt = optim.Adam(qnn_model.parameters(), lr=learning_rate)
     c_opt = optim.Adam(mlp_model.parameters(), lr=learning_rate)
 
-    q_losses, c_losses = [], []
-    q_accs, c_accs = [], []
-
-    progress = st.progress(0)
-    status_text = st.empty()
-
+    q_losses, c_losses, q_accs, c_accs = [], [], [], []
+    progress, status_text = st.progress(0), st.empty()
     start_time = time.time()
+
     for epoch in range(epochs):
         qnn_model.train()
         mlp_model.train()
@@ -283,35 +273,29 @@ if st.button("🚀 Train Both Models & Compare", type="primary"):
 
         for bx, by in train_loader:
             q_opt.zero_grad()
-            q_out = qnn_model(bx)
-            q_loss = criterion(q_out, by)
+            q_loss = criterion(qnn_model(bx), by)
             q_loss.backward()
             q_opt.step()
             q_epoch_loss += q_loss.item()
 
             c_opt.zero_grad()
-            c_out = mlp_model(bx)
-            c_loss = criterion(c_out, by)
+            c_loss = criterion(mlp_model(bx), by)
             c_loss.backward()
             c_opt.step()
             c_epoch_loss += c_loss.item()
 
         q_losses.append(q_epoch_loss / len(train_loader))
         c_losses.append(c_epoch_loss / len(train_loader))
-
+        
         q_acc = evaluate_accuracy(qnn_model, X_test_t, y_test_t, sim_noise_level, enable_zne)
         c_acc = evaluate_accuracy(mlp_model, X_test_t, y_test_t, 0.0, False)
         q_accs.append(q_acc)
         c_accs.append(c_acc)
 
         progress.progress((epoch + 1) / epochs)
-        status_text.text(
-            f"Epoch {epoch+1}/{epochs} | QNN Loss: {q_losses[-1]:.4f} (Acc: {q_acc:.1f}%) "
-            f"| MLP Loss: {c_losses[-1]:.4f} (Acc: {c_acc:.1f}%)"
-        )
+        status_text.text(f"Epoch {epoch+1}/{epochs} | QNN Loss: {q_losses[-1]:.4f} (Acc: {q_acc:.1f}%) | MLP Loss: {c_losses[-1]:.4f}")
 
-    elapsed = time.time() - start_time
-    st.success(f"Benchmarking complete in {elapsed:.1f}s.")
+    st.success(f"Benchmarking complete in {time.time() - start_time:.1f}s.")
 
     m1, m2, m3, m4 = st.columns(4)
     m1.metric("Hybrid QNN Test Acc", f"{q_accs[-1]:.1f}%")
@@ -322,22 +306,22 @@ if st.button("🚀 Train Both Models & Compare", type="primary"):
     fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(12, 4.5))
     epochs_range = range(1, epochs + 1)
 
-    ax1.plot(epochs_range, q_losses, "o-", color="#7c3aed", label=f"Hybrid QNN ({q_params} params)")
-    ax1.plot(epochs_range, c_losses, "s--", color="#2563eb", label=f"Classical MLP ({c_params} params)")
-    ax1.set_title("Training Loss")
-    ax1.set_xlabel("Epoch")
-    ax1.set_ylabel("BCE Loss")
-    ax1.grid(True, alpha=0.3)
-    ax1.legend()
+    ax1.plot(epochs_range, q_losses, "o-", color="#7c3aed", label="Hybrid QNN")
+    ax1.plot(epochs_range, c_losses, "s--", color="#2563eb", label="Classical MLP")
+    ax1.set_title("Training Loss"), ax1.set_xlabel("Epoch"), ax1.set_ylabel("BCE Loss"), ax1.legend(), ax1.grid(True, alpha=0.3)
 
     ax2.plot(epochs_range, q_accs, "o-", color="#7c3aed", label="Hybrid QNN")
     ax2.plot(epochs_range, c_accs, "s--", color="#2563eb", label="Classical MLP")
-    ax2.set_title("Test Accuracy (%)")
-    ax2.set_xlabel("Epoch")
-    ax2.set_ylabel("Accuracy (%)")
-    ax2.set_ylim(40, 105)
-    ax2.grid(True, alpha=0.3)
-    ax2.legend()
+    ax2.set_title("Test Accuracy (%)"), ax2.set_xlabel("Epoch"), ax2.set_ylabel("Accuracy (%)"), ax2.set_ylim(40, 105), ax2.legend(), ax2.grid(True, alpha=0.3)
 
     plt.tight_layout()
     st.pyplot(fig)
+
+    # Allow downloading the raw benchmark metrics as CSV
+    df_export = pd.DataFrame({"Epoch": epochs_range, "QNN_Loss": q_losses, "MLP_Loss": c_losses, "QNN_Accuracy_%": q_accs, "MLP_Accuracy_%": c_accs})
+    st.download_button(
+        label="📥 Download Benchmark Results (CSV)",
+        data=df_export.to_csv(index=False).encode('utf-8'),
+        file_name="benchmark_metrics.csv",
+        mime="text/csv"
+    )
