@@ -119,7 +119,6 @@ def load_and_sanitize_data(dataset_name: str, n_qubits: int, n_samples: int, _cs
         df = pd.read_csv(_csv_file)
         df = df.dropna(subset=[t_col])
         y_raw = df[t_col].astype(int).values
-        # Drop target and grab only numeric columns
         X_df = df.drop(columns=[t_col]).select_dtypes(include=[np.number]).fillna(0)
         X_raw = X_df.values
         feature_names = list(X_df.columns)
@@ -176,7 +175,7 @@ with st.expander("🔍 Inspect Angle Mapping (First 3 Samples)", expanded=False)
         preview_rows.append(row)
     st.table(preview_rows)
 
-# Step 2: Build Circuit Architecture (Upgraded to EfficientSU2)
+# Step 2: Build Circuit Architecture
 def build_quantum_circuit(n_qubits: int, reps: int):
     f_map = zz_feature_map(feature_dimension=n_qubits, reps=1, entanglement="linear")
     ansatz = EfficientSU2(num_qubits=n_qubits, reps=reps, entanglement="linear")
@@ -298,21 +297,30 @@ if st.button("🚀 Train Both Models & Compare", type="primary"):
     st.success(f"Benchmarking complete in {time.time() - start_time:.1f}s.")
 
     m1, m2, m3, m4 = st.columns(4)
-    m1.metric("Hybrid QNN Test Acc", f"{q_accs[-1]:.1f}%")
-    m2.metric("Classical MLP Test Acc", f"{c_accs[-1]:.1f}%")
+    m1.metric("Hybrid Quantum Neural Network (QNN) Test Acc", f"{q_accs[-1]:.1f}%")
+    m2.metric("Classical Multi-Layer Perceptron (MLP) Test Acc", f"{c_accs[-1]:.1f}%")
     m3.metric("Hybrid QNN Params", f"{q_params}", delta=f"-{100 - int((q_params/c_params)*100)}% vs MLP", delta_color="normal")
     m4.metric("Classical MLP Params", f"{c_params}")
 
     fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(12, 4.5))
     epochs_range = range(1, epochs + 1)
 
-    ax1.plot(epochs_range, q_losses, "o-", color="#7c3aed", label="Hybrid QNN")
-    ax1.plot(epochs_range, c_losses, "s--", color="#2563eb", label="Classical MLP")
-    ax1.set_title("Training Loss"), ax1.set_xlabel("Epoch"), ax1.set_ylabel("BCE Loss"), ax1.legend(), ax1.grid(True, alpha=0.3)
+    ax1.plot(epochs_range, q_losses, "o-", color="#7c3aed", label="Hybrid Quantum Neural Network (QNN)")
+    ax1.plot(epochs_range, c_losses, "s--", color="#2563eb", label="Classical Multi-Layer Perceptron (MLP)")
+    ax1.set_title("Training Binary Cross-Entropy (BCE) Loss")
+    ax1.set_xlabel("Epoch")
+    ax1.set_ylabel("Binary Cross-Entropy (BCE) Loss")
+    ax1.grid(True, alpha=0.3)
+    ax1.legend()
 
-    ax2.plot(epochs_range, q_accs, "o-", color="#7c3aed", label="Hybrid QNN")
-    ax2.plot(epochs_range, c_accs, "s--", color="#2563eb", label="Classical MLP")
-    ax2.set_title("Test Accuracy (%)"), ax2.set_xlabel("Epoch"), ax2.set_ylabel("Accuracy (%)"), ax2.set_ylim(40, 105), ax2.legend(), ax2.grid(True, alpha=0.3)
+    ax2.plot(epochs_range, q_accs, "o-", color="#7c3aed", label="Hybrid Quantum Neural Network (QNN)")
+    ax2.plot(epochs_range, c_accs, "s--", color="#2563eb", label="Classical Multi-Layer Perceptron (MLP)")
+    ax2.set_title("Test Accuracy (%)")
+    ax2.set_xlabel("Epoch")
+    ax2.set_ylabel("Accuracy (%)")
+    ax2.set_ylim(40, 105)
+    ax2.grid(True, alpha=0.3)
+    ax2.legend()
 
     plt.tight_layout()
     st.pyplot(fig)
